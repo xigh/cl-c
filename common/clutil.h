@@ -1,3 +1,7 @@
+// The clCreateCommandQueue function was deprecated as of OpenCL 2.0,
+// and replaced with clCreateCommandQueueWithProperties.
+
+#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
 #include <CL/cl.h>
 
 struct device

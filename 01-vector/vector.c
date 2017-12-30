@@ -6,44 +6,359 @@
 // compile with: gcc -Wall -o vector vector.c ../common/clenum.c ../common/clerror.c -lOpenCL
 
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 #include "../common/clutil.h"
 
-#define EXENAME "vector"
+#define EXENAME     "vector"
+#define VEC_SIZE    (8 * 1024 * 1024)
 
-void CL_CALLBACK notify(const char *err_info, const void *private_info, size_t cb, void *user_data)
+const char *kernel_add = "__kernel void vAdd(__global const float* a, __global const float* b,"
+                         "                   __global float* c, const unsigned int n)"
+                         "{"
+                         "   int i = get_global_id(0);"
+                         "   if (i < n)"
+                         "   {"
+                         "       c[i] = a[i] + b[i];"
+                         "   }"
+                         "}";
+
+struct data
 {
-    struct device *d;
+    unsigned int size;
 
-    d = (struct device *)user_data;
-    fprintf(stderr, "%d.%d: received notification: %s\n", d->pid, d->did, err_info);
+    float *buf0;
+    float *buf1;
+    float *buf2;
+
+    cl_mem mem0;
+    cl_mem mem1;
+    cl_mem mem2;
+
+    cl_context ctx;
+    cl_program prog;
+    cl_kernel kern;
+    cl_command_queue queue;
+};
+
+int testVectorStep3(struct device *d, struct data *x)
+{
+    size_t len;
+    cl_int err;
+    size_t size;
+    int ok;
+
+    ok = 0;
+    len = strlen(kernel_add);
+
+    x->prog = clCreateProgramWithSource(x->ctx, 1, &kernel_add, &len, &err);
+    if (x->prog == NULL)
+    {
+        fprintf(stderr, "%d.%d: clCreateProgramWithSource failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    err = clBuildProgram(x->prog, 0, NULL, NULL, NULL, NULL);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clBuildProgram failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    x->kern = clCreateKernel(x->prog, "vAdd", &err);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clCreateKernel failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    err = clSetKernelArg(x->kern, 0, sizeof(cl_mem), &x->mem0);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clSetKernelArg[0] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    err = clSetKernelArg(x->kern, 1, sizeof(cl_mem), &x->mem1);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clSetKernelArg[1] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    err = clSetKernelArg(x->kern, 2, sizeof(cl_mem), &x->mem2);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clSetKernelArg[2] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    err = clSetKernelArg(x->kern, 3, sizeof(unsigned int), &x->size);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clSetKernelArg[3] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    x->queue = clCreateCommandQueue(x->ctx, d->device, 0, &err);
+    if (x->queue == NULL)
+    {
+        fprintf(stderr, "%d.%d: clCreateCommandQueue failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    // async write
+    err = clEnqueueWriteBuffer(x->queue, x->mem0, CL_FALSE, 0,
+                               sizeof(cl_float) * x->size, x->buf0, 0, NULL, NULL);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clEnqueueWriteBuffer[mem0] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    printf("%d.%d: mem0 uploaded\n", d->pid, d->did);
+
+    // async write
+    err = clEnqueueWriteBuffer(x->queue, x->mem1, CL_FALSE, 0,
+                               sizeof(cl_float) * x->size, x->buf1, 0, NULL, NULL);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clEnqueueWriteBuffer[mem1] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    printf("%d.%d: mem1 uploaded\n", d->pid, d->did);
+
+    size = (size_t)x->size;
+
+    err = clEnqueueNDRangeKernel(x->queue, x->kern, 1, NULL, &size, NULL, 0, NULL, NULL);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clEnqueueNDRangeKernel failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    printf("%d.%d: prog kernel queued\n", d->pid, d->did);
+
+    err = clFinish(x->queue);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clEnqueueNDRangeKernel failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    printf("%d.%d: prog kernel finished\n", d->pid, d->did);
+
+    // block read
+    err = clEnqueueReadBuffer(x->queue, x->mem2, CL_TRUE, 0,
+                              sizeof(cl_float) * x->size, x->buf2, 0, NULL, NULL);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clEnqueueReadBuffer[mem2] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    printf("%d.%d: mem2 downloaded\n", d->pid, d->did);
+
+    ok = 1;
+
+error:
+    if (x->queue)
+    {
+        err = clReleaseCommandQueue(x->queue);
+        if (err != CL_SUCCESS)
+        {
+            fprintf(stderr, "%d.%d: clReleaseCommandQueue failed with %d\n", d->pid, d->did, err);
+            goto error;
+        }
+    }
+
+    if (x->kern)
+    {
+        err = clReleaseKernel(x->kern);
+        if (err != CL_SUCCESS)
+        {
+            fprintf(stderr, "%d.%d: clReleaseKernel failed with %d\n", d->pid, d->did, err);
+            goto error;
+        }
+    }
+
+    if (x->prog)
+    {
+        err = clReleaseProgram(x->prog);
+        if (err != CL_SUCCESS)
+        {
+            fprintf(stderr, "%d.%d: clReleaseProgram failed with %d\n", d->pid, d->did, err);
+            goto error;
+        }
+    }
+
+    return ok;
 }
 
-void testVector(struct device *d)
+int testVectorStep2(struct device *d, struct data *x)
 {
-    cl_context ctx;
     cl_int err;
+    int ok;
 
-    ctx = clCreateContext(NULL, 1, &d->device, notify, d, &err);
-    if (ctx == NULL)
+    ok = 0;
+
+    x->mem0 = clCreateBuffer(x->ctx, CL_MEM_READ_ONLY, sizeof(cl_float) * x->size, NULL, &err);
+    if (x->mem0 == NULL)
+    {
+        fprintf(stderr, "%d.%d: clCreateBuffer[mem0] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    printf("%d.%d: mem0 buffer allocated\n", d->pid, d->did);
+
+    x->mem1 = clCreateBuffer(x->ctx, CL_MEM_READ_ONLY, sizeof(cl_float) * x->size, NULL, &err);
+    if (x->mem1 == NULL)
+    {
+        fprintf(stderr, "%d.%d: clCreateBuffer[mem1] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    printf("%d.%d: mem1 buffer allocated\n", d->pid, d->did);
+
+    x->mem2 = clCreateBuffer(x->ctx, CL_MEM_READ_ONLY, sizeof(cl_float) * x->size, NULL, &err);
+    if (x->mem2 == NULL)
+    {
+        fprintf(stderr, "%d.%d: clCreateBuffer[mem2] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    printf("%d.%d: mem2 buffer allocated\n", d->pid, d->did);
+
+    ok = testVectorStep3(d, x);
+
+error:
+    if (x->mem2 != NULL)
+    {
+        err = clReleaseMemObject(x->mem2);
+        if (err != CL_SUCCESS)
+        {
+            fprintf(stderr, "%d.%d: clReleaseMemObject(mem2) failed with %d\n", d->pid, d->did, err);
+        }
+    }
+
+    if (x->mem1 != NULL)
+    {
+        err = clReleaseMemObject(x->mem1);
+        if (err != CL_SUCCESS)
+        {
+            fprintf(stderr, "%d.%d: clReleaseMemObject(mem1) failed with %d\n", d->pid, d->did, err);
+        }
+    }
+
+    if (x->mem0 != NULL)
+    {
+        err = clReleaseMemObject(x->mem0);
+        if (err != CL_SUCCESS)
+        {
+            fprintf(stderr, "%d.%d: clReleaseMemObject(mem0) failed with %d\n", d->pid, d->did, err);
+        }
+    }
+
+    return ok;
+}
+
+void testVectorStep1(struct device *d)
+{
+    struct data x;
+    cl_int err;
+    int i;
+
+    memset(&x, 0, sizeof(x));
+
+    x.size = VEC_SIZE;
+
+    x.buf0 = (float *)malloc(x.size * sizeof(float));
+    if (x.buf0 == NULL)
+    {
+        fprintf(stderr, "Could not allocate memory [x.buf0]\n");
+        goto error;
+    }
+
+    x.buf1 = (float *)malloc(x.size * sizeof(float));
+    if (x.buf1 == NULL)
+    {
+        fprintf(stderr, "Could not allocate memory [x.buf1]\n");
+        goto error;
+    }
+
+    printf("%d:%d: generating source buffer (rand)\n", d->pid, d->did);
+
+    for (i = 0; i < x.size; i += 1)
+    {
+        x.buf0[i] = (float)rand() / (float)RAND_MAX;
+        x.buf1[i] = (float)rand() / (float)RAND_MAX;
+    }
+
+    x.buf2 = (float *)malloc(x.size * sizeof(float));
+    if (x.buf2 == NULL)
+    {
+        fprintf(stderr, "Could not allocate memory [x.buf2]\n");
+        goto error;
+    }
+
+    x.ctx = clCreateContext(NULL, 1, &d->device, NULL, NULL, &err);
+    if (x.ctx == NULL)
     {
         fprintf(stderr, "%d.%d: clCreateContext failed with %d\n", d->pid, d->did, err);
-        return;
+        goto error;
     }
 
     printf("%d.%d: context created\n", d->pid, d->did);
-    // TODO: continue here
-
-    err = clReleaseContext(ctx);
-    if (err != CL_SUCCESS)
+    if (testVectorStep2(d, &x) != 0)
     {
-        fprintf(stderr, "%d.%d: clReleaseContext failed with %d\n", d->pid, d->did, err);
-        return;
+        for (i = 0; i < x.size; i += 1)
+        {
+            float sum;
+
+            sum = x.buf0[i] + x.buf1[i];
+            if (x.buf2[i] != sum)
+            {
+                printf("%d.%d: check error at %d: %f + %f != %f\n",
+                       d->pid, d->did, i, x.buf0[i], x.buf1[i], x.buf2[i]);
+                goto error;
+            }
+        }
+
+        printf("%d.%d: check ok: added %d floats\n", d->pid, d->did, x.size);
+    }
+
+error:
+    if (x.ctx)
+    {
+        err = clReleaseContext(x.ctx);
+        if (err != CL_SUCCESS)
+        {
+            fprintf(stderr, "%d.%d: clReleaseContext failed with %d\n", d->pid, d->did, err);
+        }
+    }
+
+    if (x.buf2)
+    {
+        free(x.buf2);
+    }
+
+    if (x.buf1)
+    {
+        free(x.buf1);
+    }
+
+    if (x.buf0)
+    {
+        free(x.buf0);
     }
 }
 
 int main(int argc, char **argv)
 {
     struct device *devices, *d;
+
+    srand(1);
 
     devices = enumCLDevices();
     if (devices == NULL)
@@ -63,9 +378,11 @@ int main(int argc, char **argv)
         case CL_DEVICE_TYPE_CPU:
             dtype = "cpu";
             break;
+
         case CL_DEVICE_TYPE_GPU:
             dtype = "gpu";
             break;
+
         case CL_DEVICE_TYPE_ACCELERATOR:
             dtype = "accel";
             break;
@@ -73,7 +390,7 @@ int main(int argc, char **argv)
 
         printf("%d.%d: %s [%s]\n", d->pid, d->did, d->name, dtype);
 
-        testVector(d);
+        testVectorStep1(d);
     }
 
     freeCLDevices(devices);
