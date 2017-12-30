@@ -3,7 +3,7 @@
 // Do operations on vectors/matrices
 //
 
-// compile with: gcc -Wall -o vector vector.c ../common/clenum.c -lOpenCL
+// compile with: gcc -Wall -o vector vector.c ../common/clenum.c ../common/clerror.c -lOpenCL
 
 #include <stdio.h>
 #include "../common/clutil.h"
