@@ -38,6 +38,7 @@ struct data
     cl_context ctx;
     cl_program prog;
     cl_kernel kern;
+    cl_event evt;
     cl_command_queue queue;
 };
 
@@ -46,6 +47,7 @@ int testVectorStep3(struct device *d, struct data *x)
     size_t len;
     cl_int err;
     size_t size;
+    cl_ulong start, end;
     int ok;
 
     ok = 0;
@@ -100,7 +102,7 @@ int testVectorStep3(struct device *d, struct data *x)
         goto error;
     }
 
-    x->queue = clCreateCommandQueue(x->ctx, d->device, 0, &err);
+    x->queue = clCreateCommandQueue(x->ctx, d->device, CL_QUEUE_PROFILING_ENABLE, &err);
     if (x->queue == NULL)
     {
         fprintf(stderr, "%d.%d: clCreateCommandQueue failed with %d\n", d->pid, d->did, err);
@@ -131,7 +133,7 @@ int testVectorStep3(struct device *d, struct data *x)
 
     size = (size_t)x->size;
 
-    err = clEnqueueNDRangeKernel(x->queue, x->kern, 1, NULL, &size, NULL, 0, NULL, NULL);
+    err = clEnqueueNDRangeKernel(x->queue, x->kern, 1, NULL, &size, NULL, 0, NULL, &x->evt);
     if (err != CL_SUCCESS)
     {
         fprintf(stderr, "%d.%d: clEnqueueNDRangeKernel failed with %d\n", d->pid, d->did, err);
@@ -160,9 +162,40 @@ int testVectorStep3(struct device *d, struct data *x)
 
     printf("%d.%d: mem2 downloaded\n", d->pid, d->did);
 
+    err = clWaitForEvents(1, &x->evt);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clWaitForEvents failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+    
+    err = clGetEventProfilingInfo(x->evt, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clGetEventProfilingInfo[start] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    err = clGetEventProfilingInfo(x->evt, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clGetEventProfilingInfo[end] failed with %d\n", d->pid, d->did, err);
+        goto error;
+    }
+
+    printf("%d.%d: duration: %g seconds\n", d->pid, d->did, (float)(end - start) / 1e9f);
+
     ok = 1;
 
 error:
+    if (x->evt) {
+        err = clReleaseEvent(x->evt);
+        if (err != CL_SUCCESS)
+        {
+            fprintf(stderr, "%d.%d: clReleaseEvent failed with %d\n", d->pid, d->did, err);
+        }
+    }
+
     if (x->queue)
     {
         err = clReleaseCommandQueue(x->queue);
