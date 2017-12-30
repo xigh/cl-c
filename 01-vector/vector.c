@@ -10,6 +10,37 @@
 
 #define EXENAME "vector"
 
+void CL_CALLBACK notify(const char *err_info, const void *private_info, size_t cb, void *user_data)
+{
+    struct device *d;
+
+    d = (struct device *)user_data;
+    fprintf(stderr, "%d.%d: received notification: %s\n", d->pid, d->did, err_info);
+}
+
+void testVector(struct device *d)
+{
+    cl_context ctx;
+    cl_int err;
+
+    ctx = clCreateContext(NULL, 1, &d->device, notify, d, &err);
+    if (ctx == NULL)
+    {
+        fprintf(stderr, "%d.%d: clCreateContext failed with %d\n", d->pid, d->did, err);
+        return;
+    }
+
+    printf("%d.%d: context created\n", d->pid, d->did);
+    // TODO: continue here
+
+    err = clReleaseContext(ctx);
+    if (err != CL_SUCCESS)
+    {
+        fprintf(stderr, "%d.%d: clReleaseContext failed with %d\n", d->pid, d->did, err);
+        return;
+    }
+}
+
 int main(int argc, char **argv)
 {
     struct device *devices, *d;
@@ -41,6 +72,8 @@ int main(int argc, char **argv)
         }
 
         printf("%d.%d: %s [%s]\n", d->pid, d->did, d->name, dtype);
+
+        testVector(d);
     }
 
     freeCLDevices(devices);
