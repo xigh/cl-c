@@ -1,7 +1,7 @@
 // info.c
 //
 // Query basic opencl information from the system.
-// If you need more, use clinfo 
+// If you need more, use clinfo
 //
 
 // compile with: gcc -Wall -o info info.c -lOpenCL
@@ -110,7 +110,7 @@ int main(int argc, char **argv)
     for (np = 0; np < nps; np += 1)
     {
         char *name, *version;
-        
+
         name = getPlateformString(platforms[np], CL_PLATFORM_NAME);
         if (name == NULL)
         {
@@ -146,13 +146,14 @@ int main(int argc, char **argv)
             fprintf(stderr, EXENAME ": clGetDeviceIDs failed with %d\n", err);
             return -1;
         }
-        
-        for (nd = 0; nd < nds; nd += 1) {
+
+        for (nd = 0; nd < nds; nd += 1)
+        {
             char *dname, *dstype;
             cl_device_type dtype;
             cl_uint cunits;
             cl_ulong memsize;
-            
+
             dname = getDeviceString(devices[nd], CL_DEVICE_NAME);
             if (dname == NULL)
             {
@@ -165,9 +166,10 @@ int main(int argc, char **argv)
                 fprintf(stderr, EXENAME ": clGetDeviceInfo(CL_DEVICE_TYPE, %d) failed with %d\n", nd, err);
                 return -1;
             }
-            
+
             dstype = "unknown";
-            switch (dtype) {
+            switch (dtype)
+            {
             case CL_DEVICE_TYPE_CPU:
                 dstype = "cpu";
                 break;
@@ -188,7 +190,7 @@ int main(int argc, char **argv)
                 fprintf(stderr, EXENAME ": clGetDeviceInfo(CL_DEVICE_MAX_COMPUTE_UNITS, %d) failed with %d\n", nd, err);
                 continue;
             }
-            
+
             printf("      %d compute units\n", cunits);
 
             err = clGetDeviceInfo(devices[nd], CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(memsize), &memsize, NULL);
@@ -197,19 +199,23 @@ int main(int argc, char **argv)
                 fprintf(stderr, EXENAME ": clGetDeviceInfo(CL_DEVICE_GLOBAL_MEM_SIZE, %d) failed with %d\n", nd, err);
                 continue;
             }
-            
-            if (memsize > 1024l*1024l*1024l) {
-                printf("      global memory size: %.1fGB\n", ((float) memsize) / (1024.0 * 1024.0 * 1024.0));
+
+            if (memsize > 1024l * 1024l * 1024l)
+            {
+                printf("      global memory size: %.1fGB\n", ((float)memsize) / (1024.0 * 1024.0 * 1024.0));
             }
-            else if (memsize > 1024l*1024l) {
-                printf("      global memory size: %.1fMB\n", ((float) memsize) / (1024.0 * 1024.0));
+            else if (memsize > 1024l * 1024l)
+            {
+                printf("      global memory size: %.1fMB\n", ((float)memsize) / (1024.0 * 1024.0));
             }
-            else if (memsize > 1024) {
-                printf("      global memory size: %.1fkB\n", ((float) memsize) / 1024.0);
+            else if (memsize > 1024)
+            {
+                printf("      global memory size: %.1fkB\n", ((float)memsize) / 1024.0);
             }
-            else {
-                printf("      global memory size: %ld\n", memsize);                
-            }            
+            else
+            {
+                printf("      global memory size: %ld\n", memsize);
+            }
         }
     }
 
