@@ -1,1 +1,2 @@
-# Some tests in opencl in "plain" c (no c++, no cuda, ...)
+# OpenCL tutorials "plain" c
+(no c++, no cuda, no build system ...)
