@@ -8,10 +8,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 #include "../common/clutil.h"
 
 #define EXENAME     "vector"
-#define VEC_SIZE    (8 * 1024 * 1024)
+#define VEC_SIZE    (100 * 1024 * 1024)
 
 const char *kernel_add = "__kernel void vAdd(__global const float* a, __global const float* b,"
                          "                   __global float* c, const unsigned int n)"
@@ -300,6 +301,8 @@ void testVectorStep1(struct device *d)
 {
     struct data x;
     cl_int err;
+    struct timespec start, end;
+    float dur;
     int i;
 
     memset(&x, 0, sizeof(x));
@@ -345,12 +348,40 @@ void testVectorStep1(struct device *d)
     printf("%d.%d: context created\n", d->pid, d->did);
     if (testVectorStep2(d, &x) != 0)
     {
+        float *buf;
+
+        buf = (float *) malloc(sizeof(float) * x.size);
+        if (buf == 0) {
+            fprintf(stderr, "Could not allocate memory [buf]\n");
+            goto error;
+        }
+
+        printf("%d.%d: computing vector addition with CPU\n", d->pid, d->did);
+
+        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
+
         for (i = 0; i < x.size; i += 1)
         {
-            float sum;
+            buf[i] = x.buf0[i] + x.buf1[i];
+        }
 
-            sum = x.buf0[i] + x.buf1[i];
-            if (x.buf2[i] != sum)
+        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
+
+	    if ((end.tv_nsec-start.tv_nsec)<0) {
+		    dur = (float) (end.tv_sec-start.tv_sec-1) + 
+                (float) (1000000000+end.tv_nsec-start.tv_nsec) / 1e9;
+	    } else {
+		    dur = (float) (end.tv_sec-start.tv_sec) +
+		        (float) (end.tv_nsec-start.tv_nsec) / 1e9;
+	    }
+
+        printf("%d.%d: vectors added in %g seconds\n", d->pid, d->did, dur);
+
+        printf("%d.%d: comparing results ...\n", d->pid, d->did);
+
+        for (i = 0; i < x.size; i += 1)
+        {
+            if (x.buf2[i] != buf[i])
             {
                 printf("%d.%d: check error at %d: %f + %f != %f\n",
                        d->pid, d->did, i, x.buf0[i], x.buf1[i], x.buf2[i]);
